@@ -28,22 +28,21 @@
 #include <QColor>
 #include <QComboBox>
 #include <QProgressBar>
+#include <QCompleter>
+#include <QStringListModel>
 
+#include "qdlt.h"
 #include "tablemodel.h"
 #include "project.h"
 #include "settingsdialog.h"
 #include "searchdialog.h"
-#include "optmanager.h"
-#include "qdlt.h"
-#include "dltsettingsmanager.h"
 #include "filterdialog.h"
 #include "dltfileindexer.h"
 #include "workingdirectory.h"
 #include "exporterdialog.h"
-#include <QCompleter>
 #include "searchtablemodel.h"
 #include "ui_mainwindow.h"
-#include <QStringListModel>
+
 
 /**
  * When ecu items buffer size exceeds this while using
@@ -115,11 +114,9 @@ public:
     explicit MainWindow(QWidget *parent = 0);
     ~MainWindow();
 
-    QCompleter *newCompleter;
-
 private:
     Ui::MainWindow *ui;
-
+    QCompleter *newCompleter;
     /* Timer for connecting to ECUs */
     QTimer timer;
 
@@ -137,6 +134,7 @@ private:
 
     /* Status line items */
     QLabel *statusFilename;
+    QLabel *statusFileError;
     QLabel *statusFileVersion;
     QLabel *statusBytesReceived;
     QLabel *statusByteErrorsReceived;
@@ -156,7 +154,8 @@ private:
     ExporterDialog exporterDialog;
 
     /* Settings dialog containing also the settings parameter itself */
-    SettingsDialog *settings;
+    SettingsDialog *settingsDlg;
+    QDltSettingsManager *settings;
     QLineEdit *searchTextbox;
     QComboBox *searchComboBox;
 
@@ -203,7 +202,21 @@ private:
     enum { MaxRecentHostnames = 10 };
     QStringList recentHostnames;
     enum { MaxRecentPorts = 10 };
-    QStringList recentPorts;
+    QStringList recentSerialPorts;
+    QStringList recentIPPorts;
+    QStringList recentUDPPorts;
+    QString recentEthIF;
+    QStringList recent_multicastAddresses;
+
+    /* for UDP live receive functions */
+    QHostAddress UDPsender; // in readdatagramm
+    quint16 senderPort; // in readdatagramm
+
+    /* used in ::read() */
+    QByteArray bufferHeader;
+    QByteArray bufferPayload;
+    QByteArray data;
+    QDltMsg qmsg;
 
     /* dlt-file Indexer with cancel cabability */
     DltFileIndexer *dltIndexer;
@@ -221,6 +234,8 @@ private:
 
     /* keep the target version string submited by the target for internal use */
     QString target_version_string;
+
+    QList<unsigned long int> selectedMarkerRows;
 
     /* functions called in constructor */
     void initState();
@@ -243,8 +258,8 @@ private:
 
     void reloadLogFileDefaultFilter();
 
-    void exportSelection(bool ascii,bool file);
-    void exportSelection_searchTable();
+    void exportSelection(bool ascii,bool file,bool payload_only);
+    void exportSelection_searchTable(bool payload_only);
 
     void ControlServiceRequest(EcuItem* ecuitem, int service_id );
     void SendInjection(EcuItem* ecuitem);
@@ -288,6 +303,7 @@ private:
     void updateRecentFileActions();
     void setCurrentFile(const QString &fileName);
     void removeCurrentFile(const QString &fileName);
+    void createsplitfile();
 
     void updateRecentProjectActions();
     void setCurrentProject(const QString &projectName);
@@ -298,7 +314,13 @@ private:
     void removeCurrentFilters(const QString &filtersName);
 
     void setCurrentHostname(const QString &hostName);
-    void setCurrentPort(const QString &portName);
+    void setCurrentMCAddress(const QString &mcastaddress);
+    void setCurrentSerialPort(const QString &portName);
+    void setCurrentIPPort(const QString &portName);
+    void setCurrentUDPPort(const QString &portName);
+    void setCurrentEthIF(const QString &EthIfName);
+    void setMcast(bool mcast);
+    void setInterfaceTypeSelection(int selectindex);
 
     void sendUpdates(EcuItem* ecuitem);
 
@@ -318,7 +340,13 @@ private:
 
     void iterateDecodersForMsg(QDltMsg &, int triggeredByUser);
 
+    /* return IP connection type as QString */
+    QString GetConnectionType(int iTypeNumber);
+
     QStringList getAvailableSerialPorts();
+    QStringList getAvailableIPPorts() {return { "3490"};} // DLT standard port
+    QStringList getAvailableUDPPorts() {return { "3490"};} // DLT standard port
+    QStringList getAvailableNetworkInterfaces();
 
     void deleteactualFile();
 
@@ -396,11 +424,16 @@ private slots:
 public slots:
 
     void onNewTriggered(QString fileName);
+    void SplitTriggered(QString fileName);
     void onOpenTriggered(QStringList filenames);
     void onSaveAsTriggered(QString fileName);
     void on_action_menuFile_Clear_triggered();
     void on_action_menuFile_Quit_triggered();
     void on_actionFindNext();
+    void mark_unmark_lines();
+    void unmark_all_lines();
+
+
 private slots:
 
     // Search methods
@@ -434,8 +467,10 @@ private slots:
     void on_action_menuConfig_Disconnect_triggered();
     void on_action_menuConfig_Connect_triggered();
     void on_action_menuConfig_Delete_All_Contexts_triggered();
+    void onActionAenuConfigCopyPayloadToClipboardTriggered();
     void on_action_menuConfig_Copy_to_clipboard_triggered();
     void onActionMenuConfigSearchTableCopyToClipboardTriggered();
+    void onActionMenuConfigSearchTableCopyPayloadToClipboardTriggered();
 
     // DLT methods
     void on_action_menuDLT_Send_Injection_triggered();
@@ -459,6 +494,8 @@ private slots:
     void on_action_menuFilter_Clear_all_triggered();
     void on_action_menuFilter_Duplicate_triggered();
     void on_action_menuFilter_Append_Filters_triggered();
+    void onactionmenuFilter_SetAllActiveTriggered();
+    void onactionmenuFilter_SetAllInactiveTriggered();
 
     // Plugin methods
     void on_action_menuPlugin_Hide_triggered();
@@ -468,6 +505,8 @@ private slots:
     void on_action_menuPlugin_Disable_triggered();
 
     //Rename
+    void indexDone();
+    void indexStart();
     void filterAdd();
     void filterAddTable();
     void connected();
@@ -484,7 +523,7 @@ private slots:
     void openRecentProject();
     void openRecentFilters();
     void applyConfigEnabled(bool enabled);
-    void stateChangedTCP(QAbstractSocket::SocketState socketState);
+    void stateChangedIP(QAbstractSocket::SocketState socketState);
     void stateChangedSerial(bool dsrChanged);
     void sectionInTableDoubleClicked(int logicalIndex);
     void on_actionJump_To_triggered();
@@ -507,13 +546,15 @@ private slots:
     void on_pushButtonDefaultFilterUpdateCache_clicked();
 
     void on_checkBoxSortByTime_toggled(bool checked);
+    void on_checkBoxSortByTimestamp_toggled(bool checked);
 
     void on_actionMarker_triggered();
 
     void on_actionToggle_PluginsEnabled_triggered(bool checked);
     void on_actionToggle_FiltersEnabled_triggered(bool checked);
-    void on_actionToggle_SortByTimeEnabled_triggered(bool checked);
 
+    void on_actionToggle_SortByTimeEnabled_triggered(bool checked);
+    void on_actionSort_By_Timestamp_triggered(bool checked);
 
 public slots:
 

@@ -6,7 +6,6 @@
 #include "dltexporter.h"
 #include "fieldnames.h"
 #include "project.h"
-#include "optmanager.h"
 
 DltExporter::DltExporter(QObject *parent) :
     QObject(parent)
@@ -90,7 +89,7 @@ bool DltExporter::start()
     {
         if(!to->open(QIODevice::WriteOnly | QIODevice::Text))
         {
-            if ( true == OptManager::getInstance()->issilentMode() )
+            if ( true == QDltOptManager::getInstance()->issilentMode() )
              {
              qDebug() << QString("ERROR - cannot open the export file %1").arg(to->fileName());
              }
@@ -104,7 +103,7 @@ bool DltExporter::start()
     {
         if(!to->open(QIODevice::WriteOnly))
         {
-            if ( true == OptManager::getInstance()->issilentMode() )
+            if ( true == QDltOptManager::getInstance()->issilentMode() )
              {
              qDebug() << QString("ERROR - cannot open the export file %1").arg(to->fileName());
              }
@@ -121,7 +120,7 @@ bool DltExporter::start()
         /* Write the first line of CSV file */
         if(!writeCSVHeader(to))
         {
-            if ( true == OptManager::getInstance()->issilentMode() )
+            if ( true == QDltOptManager::getInstance()->issilentMode() )
              {
              qDebug() << QString("ERROR - cannot open the export file %1").arg(to->fileName());
              }
@@ -158,7 +157,8 @@ bool DltExporter::finish()
         /* close output file */
         to->close();
     }
-    else if (exportFormat == DltExporter::FormatClipboard)
+    else if (exportFormat == DltExporter::FormatClipboard ||
+             exportFormat == DltExporter::FormatClipboardPayloadOnly)
     {
         /* export to clipboard */
         QClipboard *clipboard = QApplication::clipboard();
@@ -168,7 +168,7 @@ bool DltExporter::finish()
     return true;
 }
 
-bool DltExporter::getMsg(int num,QDltMsg &msg,QByteArray &buf)
+bool DltExporter::getMsg(unsigned long int num,QDltMsg &msg,QByteArray &buf)
 {
     buf.clear();
     if(exportSelection == DltExporter::SelectionAll)
@@ -197,27 +197,33 @@ bool DltExporter::getMsg(int num,QDltMsg &msg,QByteArray &buf)
     return msg.setMsg(buf);
 }
 
-bool DltExporter::exportMsg(int num, QDltMsg &msg, QByteArray &buf)
+bool DltExporter::exportMsg(unsigned long int num, QDltMsg &msg, QByteArray &buf)
 {
     if((exportFormat == DltExporter::FormatDlt)||(exportFormat == DltExporter::FormatDltDecoded))
     {
         to->write(buf);
     }
-    else if(exportFormat == DltExporter::FormatAscii || exportFormat == DltExporter::FormatUTF8 || exportFormat == DltExporter::FormatClipboard)
+    else if(exportFormat == DltExporter::FormatAscii ||
+            exportFormat == DltExporter::FormatUTF8  ||
+            exportFormat == DltExporter::FormatClipboard ||
+            exportFormat == DltExporter::FormatClipboardPayloadOnly)
     {
         QString text;
 
         /* get message ASCII text */
-        if(exportSelection == DltExporter::SelectionAll)
-            text += QString("%1 ").arg(num);
-        else if(exportSelection == DltExporter::SelectionFiltered)
-            text += QString("%1 ").arg(from->getMsgFilterPos(num));
-        else if(exportSelection == DltExporter::SelectionSelected)
-            text += QString("%1 ").arg(from->getMsgFilterPos(selectedRows[num]));
-        else
-            return false;
-        text += msg.toStringHeader();
-        text += " ";
+        if(exportFormat != DltExporter::FormatClipboardPayloadOnly)
+        {
+            if(exportSelection == DltExporter::SelectionAll)
+                text += QString("%1 ").arg(num);
+            else if(exportSelection == DltExporter::SelectionFiltered)
+                text += QString("%1 ").arg(from->getMsgFilterPos(num));
+            else if(exportSelection == DltExporter::SelectionSelected)
+                text += QString("%1 ").arg(from->getMsgFilterPos(selectedRows[num]));
+            else
+                return false;
+            text += msg.toStringHeader();
+            text += " ";
+        }
         text += msg.toStringPayload().simplified();
         text += "\n";
         try
@@ -227,7 +233,8 @@ bool DltExporter::exportMsg(int num, QDltMsg &msg, QByteArray &buf)
                 to->write(text.toLatin1().constData());
             else if (exportFormat == DltExporter::FormatUTF8)
                 to->write(text.toUtf8().constData());
-            else if(exportFormat == DltExporter::FormatClipboard)
+            else if(exportFormat == DltExporter::FormatClipboard ||
+                    exportFormat == DltExporter::FormatClipboardPayloadOnly)
                 clipboardString += text;
          }
         catch (...)
@@ -249,8 +256,16 @@ bool DltExporter::exportMsg(int num, QDltMsg &msg, QByteArray &buf)
     return true;
 }
 
+
+void DltExporter::exportMessageRange(unsigned long start, unsigned long stop)
+{
+    this->starting_index=start;
+    this->stoping_index=stop;
+}
+
 void DltExporter::exportMessages(QDltFile *from, QFile *to, QDltPluginManager *pluginManager,
-                         DltExporter::DltExportFormat exportFormat, DltExporter::DltExportSelection exportSelection, QModelIndexList *selection)
+                                 DltExporter::DltExportFormat exportFormat,
+                                 DltExporter::DltExportSelection exportSelection, QModelIndexList *selection)
 {
     QDltMsg msg;
     QByteArray buf;
@@ -260,8 +275,6 @@ void DltExporter::exportMessages(QDltFile *from, QFile *to, QDltPluginManager *p
     int exportErrors=0;
     int exportCounter=0;
     int startFinishError=0;
-
-    this->size = 0;
     this->from = from;
     this->to = to;
     clipboardString.clear();
@@ -269,9 +282,10 @@ void DltExporter::exportMessages(QDltFile *from, QFile *to, QDltPluginManager *p
     this->selection = selection;
     this->exportFormat = exportFormat;
     this->exportSelection = exportSelection;
-
+    unsigned long int starting = 0;
+    unsigned long int stoping = this->size;
     /* start export */
-    if(!start())
+    if(false == start())
     {
         qDebug() << "DLT Export start() failed";
         startFinishError++;
@@ -279,13 +293,24 @@ void DltExporter::exportMessages(QDltFile *from, QFile *to, QDltPluginManager *p
     }
 
 
-    bool silentMode = !OptManager::getInstance()->issilentMode();
+    bool silentMode = !QDltOptManager::getInstance()->issilentMode();
 
-    qDebug() << "Start DLT export of" << size << "messages" << "silent mode" << !silentMode;
+    if ( this->stoping_index == 0 || this->stoping_index > this->size || this->stoping_index < this->starting_index )
+    {
+        stoping = this->size;
+        starting = 0;
+        qDebug() << "Start DLT export of" << this->size << "messages" << ",silent mode" << !silentMode;
+    }
+    else
+    {
+        stoping = this->stoping_index;
+        starting = this->starting_index;
+        qDebug() << "Start DLT export" << stoping - starting << "messages" << "of" << this->size << "range: " << starting << "-" << stoping << ",silent mode" << !silentMode;
+    }
 
     /* init fileprogress */
 
-    QProgressDialog fileprogress("Export ...", "Cancel", 0, this->size, qobject_cast<QWidget *>(parent()));
+    QProgressDialog fileprogress("Export ...", "Cancel", 0, stoping, qobject_cast<QWidget *>(parent()));
     if (silentMode == true)
      {
       fileprogress.setWindowTitle("DLT Viewer");
@@ -293,25 +318,30 @@ void DltExporter::exportMessages(QDltFile *from, QFile *to, QDltPluginManager *p
       fileprogress.show();
      }
 
-    for(int num = 0;num<size;num++)
+    //qDebug() << "DLT Export " << size << "line" << __LINE__;
+    for(starting;starting<stoping;starting++)
     {
         // Update progress dialog every 1000 lines
-        if( 0 == (num%1000))
+        if (silentMode == true)
+        {
+        if( 0 == (starting%1000))
         {
           if (silentMode == true)
              {
-              fileprogress.setValue(num);
+              fileprogress.setValue(starting);
              }
         }
+        } // fileprogress in non - silent mode
+
 
         // get message
-        if(false == getMsg(num,msg,buf))
+        if(false == getMsg(starting,msg,buf))
         {
-	    //  finish();
-        qDebug() << "DLT Export getMsg failed on msg index" << num;
-	    readErrors++;
-	    continue;
-	    //  return;
+        //  finish();
+        qDebug() << "DLT Export getMsg failed on msg index" << starting;
+        readErrors++;
+        continue;
+        //  return;
         }
 
         // decode message if needed
@@ -326,18 +356,22 @@ void DltExporter::exportMessages(QDltFile *from, QFile *to, QDltPluginManager *p
         }
 
         // export message
-        if(!exportMsg(num,msg,buf))
+        if(!exportMsg(starting,msg,buf))
         {
             // finish();
           qDebug() << "DLT Export exportMsg() failed";
           exportErrors++;
           continue;
         }
+
      else
-	    exportCounter++;
+        exportCounter++;
     } // for loop
+
     if (silentMode == true)
+    {
      fileprogress.close();
+    }
 
 
     if (!finish())

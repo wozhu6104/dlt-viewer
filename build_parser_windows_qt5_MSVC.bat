@@ -1,5 +1,8 @@
 @echo off
 
+REM Date     Version   Author                Changes
+REM 4.7.19   1.0       Alexander Wenzel      Update to Qt 5.12.4 and Visual Studio 2015
+
 echo ************************************
 echo ***      DLT Parser              ***
 echo ************************************
@@ -9,7 +12,7 @@ echo ************************************
 echo ***         Configuration        ***
 echo ************************************
 
-setlocal enabledelayedexpansion
+rem setlocal enabledelayedexpansion
 
 rem parameter of this batch script can be either x86 or x86_amd64
 if "%ARCHITECTURE%"=="" (
@@ -33,11 +36,11 @@ echo *** Setting up environment ***
 
 if "%QTDIR%"=="" (
     if "%ARCHITECTURE%"=="x86_amd64" (
-        set QTDIR=C:\Qt\Qt5.5.1\5.5\msvc2013_64
-    ) else (set QTDIR=C:\Qt\Qt5.5.1\5.5\msvc2013)
+        set QTDIR=C:\Qt\Qt5.12.4\5.12.4\msvc2015_64
+    ) else (set QTDIR=C:\Qt\Qt5.12.4\5.12.4\msvc2015)
 )
 
-IF "%MSVC_DIR%"=="" set MSVC_DIR=C:\Program Files (x86)\Microsoft Visual Studio 12.0\VC
+if "%MSVC_DIR%"=="" set MSVC_DIR=C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC
 
 set PATH=%QTDIR%\bin;%MSVC_DIR%;%MSVC_DIR%\bin;%PATH%
 set QTSDK=%QTDIR%
@@ -63,8 +66,7 @@ IF exist build (
 echo ************************************
 echo ***  Delete old build Directory  ***
 echo ************************************
-
-    rmdir /s/q build
+    rmdir /S /Q build
     IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
 )
 
@@ -73,7 +75,7 @@ echo ************************************
 echo ***  Delete old SDK Directory    ***
 echo ************************************
 
-    rmdir /s/q %DLT_PARSER_DIR%
+    rmdir /s /q %DLT_PARSER_DIR%
     IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
 )
 
@@ -89,7 +91,7 @@ echo ************************************
 echo ***        Build DLT Parser      ***
 echo ************************************
 
-mkdir build
+if not exist build mkdir build
 IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
 
 cd build
@@ -105,22 +107,24 @@ echo ************************************
 echo ***         Install Parser       ***
 echo ************************************
 
-echo *** Create directories ***
-mkdir %DLT_PARSER_DIR%
+echo *** Create directories %DLT_PARSER_DIR% ***
+if not exist %DLT_PARSER_DIR% mkdir %DLT_PARSER_DIR%
+rem mkdir %DLT_PARSER_DIR%
 IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
 
-mkdir %DLT_PARSER_DIR%\examples
+rem mkdir %DLT_PARSER_DIR%\examples
+if not exist %DLT_PARSER_DIR%\examples mkdir %DLT_PARSER_DIR%\examples
 IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
 
 echo *** Copy files ***
-copy %QTDIR%\bin\icuin54.dll %DLT_PARSER_DIR%
-IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
+rem copy %QTDIR%\bin\icuin54.dll %DLT_PARSER_DIR%
+rem IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
 
-copy %QTDIR%\bin\icuuc54.dll %DLT_PARSER_DIR%
-IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
+rem copy %QTDIR%\bin\icuuc54.dll %DLT_PARSER_DIR%
+rem IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
 
-copy %QTDIR%\bin\icudt54.dll %DLT_PARSER_DIR%
-IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
+rem copy %QTDIR%\bin\icudt54.dll %DLT_PARSER_DIR%
+rem IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
 
 rem copy %QTDIR%\bin\libwinpthread-1.dll %DLT_PARSER_DIR%
 rem IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
@@ -158,9 +162,8 @@ IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
 copy %QTDIR%\bin\Qt5OpenGL.dll %DLT_PARSER_DIR%
 IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
 
-copy %BUILD_DIR%\dlt_parser.exe %DLT_PARSER_DIR%
+copy %BUILD_DIR%\dlt-parser.exe %DLT_PARSER_DIR%
 IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
-
 
 copy %SOURCE_DIR%\ReleaseNotes_Parser.txt %DLT_PARSER_DIR%
 IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
@@ -174,9 +177,15 @@ IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
 copy %SOURCE_DIR%\MPL.txt %DLT_PARSER_DIR%
 IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
 
+mkdir %DLT_PARSER_DIR%\platforms 
+if %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
+ 
+copy %QTDIR%\plugins\platforms\qwindows.dll %DLT_PARSER_DIR%\platforms
+if %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
+
+
 xcopy %SOURCE_DIR%\parser\examples %DLT_PARSER_DIR%\examples /E
 IF %ERRORLEVEL% NEQ 0 GOTO ERROR_HANDLER
-
 
 GOTO QUIT
 

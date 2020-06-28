@@ -16,22 +16,27 @@
 class DltFileIndexerKey
 {
 public:
-    DltFileIndexerKey(time_t time,unsigned int microseconds);
+    DltFileIndexerKey(time_t time,unsigned int microseconds,unsigned int timestamp);
 
     friend bool operator< (const DltFileIndexerKey &key1, const DltFileIndexerKey &key2);
 
 private:
     time_t time;
     unsigned int microseconds;
+    unsigned int timestamp;
 };
 
 inline bool operator< (const DltFileIndexerKey &key1, const DltFileIndexerKey &key2)
 {
-    if(key1.time<key2.time)
-        return true;
-    if(key1.time>key2.time)
-        return false;
-    return (key1.microseconds<key2.microseconds);
+    if(key1.timestamp==0 && key2.timestamp==0)
+    {
+        if(key1.time<key2.time)
+            return true;
+        if(key1.time>key2.time)
+            return false;
+        return (key1.microseconds<key2.microseconds);
+    }
+    return (key1.timestamp<key2.timestamp);
 }
 
 class DltFileIndexer : public QThread
@@ -50,6 +55,8 @@ public:
 
     // create main index
     bool index(int num);
+
+    qint64 getfileerrors(void);
 
     // create index based on filters and apply plugins
     bool indexFilter(QStringList filenames);
@@ -91,6 +98,10 @@ public:
     void setSortByTimeEnabled(bool enable) { sortByTimeEnabled = enable; }
     bool setSortByTimeEnabled() { return sortByTimeEnabled; }
 
+    // enable/disable sort by timestamp
+    void setSortByTimestampEnabled(bool enable) { sortByTimestampEnabled = enable; }
+    bool setSortByTimestampEnabled() { return sortByTimestampEnabled; }
+
     // enable/disable multithreaded
     void setMultithreaded(bool enable) { multithreaded = enable; }
     bool getMultithreaded() { return multithreaded; }
@@ -106,6 +117,9 @@ public:
 
     // let worker thread append to getLogInfoList
     void appendToGetLogInfoList(int value);
+
+    // reset / clear file indexes
+    void clearindex() { indexAllList.clear(); }
 
     // main thread routine
     void run();
@@ -152,9 +166,13 @@ private:
     bool filtersEnabled;
     bool multithreaded;
     bool sortByTimeEnabled;
+    bool sortByTimestampEnabled;
 
     // filter cache path
     QString filterCache;
+
+    // file errors
+    qint64 errors_in_file;
 
     // run counter
     int maxRun, currentRun;

@@ -1,5 +1,4 @@
 #include "dltfileindexer.h"
-#include "optmanager.h"
 #include "dltfileindexerthread.h"
 #include "dltfileindexerdefaultfilterthread.h"
 
@@ -16,10 +15,11 @@ extern "C" {
     #include "dlt_user.h"
 }
 
-DltFileIndexerKey::DltFileIndexerKey(time_t time,unsigned int microseconds)
+DltFileIndexerKey::DltFileIndexerKey(time_t time,unsigned int microseconds,unsigned int timestamp)
 {
     this->time = time;
     this->microseconds = microseconds;
+    this->timestamp = timestamp;
 }
 
 DltFileIndexer::DltFileIndexer(QObject *parent) :
@@ -35,6 +35,7 @@ DltFileIndexer::DltFileIndexer(QObject *parent) :
     filtersEnabled = true;
     multithreaded = true;
     sortByTimeEnabled = false;
+    sortByTimestampEnabled = false;
 
     maxRun = 0;
     currentRun = 0;
@@ -56,6 +57,8 @@ DltFileIndexer::DltFileIndexer(QDltFile *dltFile, QDltPluginManager *pluginManag
     filtersEnabled = true;
     multithreaded = true;
     sortByTimeEnabled = 0;
+    sortByTimestampEnabled = 0;
+    errors_in_file  = 0;
 
     maxRun = 0;
     currentRun = 0;
@@ -113,16 +116,54 @@ bool DltFileIndexer::index(int num)
     // Go through the segments and create new index
     char lastFound = 0;
     qint64 length;
+    qint64 msgindex=0;
     qint64 pos;
+    qint64 current_message_pos = 0;
+    qint64 next_message_pos = 0;
+    int counter_header = 0;
+    quint16 message_length = 0;
+    qint64 file_size = f.size();
+    errors_in_file  = 0;
     char *data = new char[DLT_FILE_INDEXER_SEG_SIZE];
     do
     {
-
         pos = f.pos();
         length = f.read(data,DLT_FILE_INDEXER_SEG_SIZE);
         for(int num=0;num < length;num++)
         {
-            if(data[num] == 'D')
+            // search length of DLT message
+            if(counter_header>0)
+            {
+                counter_header++;
+                if (counter_header==16)
+                {
+                    // Read low byte of message length
+                    message_length = (unsigned char)data[num];
+                }
+                else if (counter_header==17)
+                {
+                    // Read high byte of message length
+                    counter_header = 0;
+                    message_length = (message_length<<8 | ((unsigned char)data[num])) +16;
+                    next_message_pos = current_message_pos + message_length;
+                    if(next_message_pos==file_size)
+                    {
+                        // last message found in file
+                        indexAllList.append(current_message_pos);
+                        break;
+                    }
+                    // speed up move directly to next message, if inside current buffer
+                    if((message_length > 20))
+                    {
+                        if((num+message_length-20<length))
+                        {
+                            num+=message_length-20;
+                        }
+                    }
+                }
+            }
+            // find DLT Header
+            else if(data[num] == 'D')
             {
                 lastFound = 'D';
             }
@@ -136,12 +177,61 @@ bool DltFileIndexer::index(int num)
             }
             else if(lastFound == 'T' && data[num] == 0x01)
             {
-                indexAllList.append(pos+num-3);
+                if(next_message_pos == 0)
+                {
+                    // first message detected or first message after error
+                    current_message_pos = pos+num-3;
+                    counter_header = 1;
+                    if(current_message_pos!=0)
+                    {
+                        // first messages not at beginning or error occured before
+                        errors_in_file++;
+                        qDebug() << "ERROR in file detected at index"<< msgindex << "msg length" << message_length << "file position" << current_message_pos;
+                        qDebug() << "------------";
+                    }
+                    // speed up move directly to message length, if inside current buffer
+                    if(num+14<length)
+                    {
+                        num+=14;
+                        counter_header+=14;
+                    }
+                }
+                else if( next_message_pos == (pos+num-3) )
+                {
+                    // Add message only when it is in the correct position in relationship to the last message
+                    indexAllList.append(current_message_pos);
+                    msgindex++;
+                    current_message_pos = pos+num-3;
+                    counter_header = 1;
+                    // speed up move directly to message length, if inside current buffer
+                    if(num+14<length)
+                    {
+                        num+=14;
+                        counter_header+=14;
+                    }
+                }
+                else if(next_message_pos > (pos+num-3))
+                {
+                    // Header detected before end of message
+                     qDebug() << "ERROR: Header detected before end of message at index "<< msgindex << "msg length" << message_length << "file position" << current_message_pos;
+                     errors_in_file++;
+                }
+                else
+                {
+                    // Header detected after end of message
+                    // start search for new message back after last header found
+                    qDebug() << "Header detected after end of message, offset:" << (pos+num-3) - next_message_pos;
+                    f.seek(current_message_pos+4);
+                    pos = current_message_pos+4;
+                    length = f.read(data,DLT_FILE_INDEXER_SEG_SIZE);
+                    num=0;
+                    next_message_pos = 0;
+                }
                 lastFound = 0;
             }
             else
             {
-                lastFound = 0;
+                lastFound = 0; // go on with search for the startsequence
             }
 
             /* stop if requested */
@@ -151,7 +241,8 @@ bool DltFileIndexer::index(int num)
                 f.close();
                 return false;
             }
-        }
+        } // end of for loop to read within one segment
+
         emit(progress(pos));
     }
     while(length>0);
@@ -162,7 +253,14 @@ bool DltFileIndexer::index(int num)
     // close file
     f.close();
 
+    if ( errors_in_file != 0 )
+    {
+    qDebug() << "Indexing error:" << errors_in_file << "wrong DLT message headers found during indexing" << msgindex << "messages";
+    }
+    else
+    {
     qDebug() << "Created index for file" << dltFile->getFileName(num);
+    }
 
     // update performance counter
     msecsIndexCounter = time.elapsed();
@@ -208,7 +306,7 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
     getLogInfoList.clear();
 
     // get silent mode
-    bool silentMode = !OptManager::getInstance()->issilentMode();
+    bool silentMode = !QDltOptManager::getInstance()->issilentMode();
 
     bool hasPlugins = (activeDecoderPlugins.size() + activeViewerPlugins.size()) > 0;
     bool hasFilters = filterList.filters.size() > 0;
@@ -220,6 +318,7 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
                 this,
                 &filterList,
                 sortByTimeEnabled,
+                sortByTimestampEnabled,
                 &indexFilterList,
                 &indexFilterListSorted,
                 pluginManager,
@@ -275,7 +374,7 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
     msecsFilterCounter = time.elapsed();
 
     // use sorted values if sort by time enabled
-    if(sortByTimeEnabled)
+    if(sortByTimeEnabled || sortByTimestampEnabled)
         indexFilterList = QVector<qint64>::fromList(indexFilterListSorted.values());
 
     // write filter index if enabled
@@ -304,7 +403,7 @@ bool DltFileIndexer::indexDefaultFilter()
     defaultFilter->clearFilterIndex();
 
     // get silent mode
-    bool silentMode = !OptManager::getInstance()->issilentMode();
+    bool silentMode = !QDltOptManager::getInstance()->issilentMode();
 
     bool useDefaultFilterThread = defaultFilter->defaultFilterList.size() > 0;
 
@@ -496,6 +595,7 @@ void DltFileIndexer::stop()
     // stop the thread
     stopFlag = true;
     wait();
+    //qDebug() << "Indexer stopped";
 }
 
 // load/safe index from/to file
@@ -587,7 +687,7 @@ bool DltFileIndexer::loadFilterIndexCache(QDltFilterList &filterList, QVector<qi
     {
         qDebug() << "loadIndex" << filterCache + "/" +filenameCache << "failed";
         return false;
-    }        
+    }
 
     return true;
 }
@@ -648,7 +748,7 @@ QString DltFileIndexer::filenameFilterIndexCache(QDltFilterList &filterList,QStr
     md5FilterList = filterList.createMD5();
 
     // create string to be hashed
-    if(sortByTimeEnabled)
+    if(sortByTimeEnabled || sortByTimestampEnabled)
         filenames.sort();
     hashString = filenames.join(QString("_"));
     hashString += "_" + QString("%1").arg(dltFile->fileSize());
@@ -668,6 +768,10 @@ QString DltFileIndexer::filenameFilterIndexCache(QDltFilterList &filterList,QStr
     if(this->sortByTimeEnabled)
     {
         filename += "_S";
+    }
+    if(this->sortByTimestampEnabled)
+    {
+        filename += "_STS";
     }
     filename += ".dix";
 
@@ -749,4 +853,10 @@ bool DltFileIndexer::loadIndex(QString filename, QVector<qint64> &index)
     file.close();
 
     return true;
+}
+
+
+qint64 DltFileIndexer::getfileerrors(void)
+{
+    return errors_in_file;
 }

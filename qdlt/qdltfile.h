@@ -22,15 +22,16 @@
 #ifndef QDLT_FILE_H
 #define QDLT_FILE_H
 
+#include "export_rules.h"
 #include <QObject>
 #include <QString>
 #include <QFile>
 #include <QDateTime>
-//#include <QColor>
+#ifdef USECOLOR
+#include <QColor>
+#endif
 #include <QMutex>
 #include <time.h>
-
-#include "export_rules.h"
 
 class QDLT_EXPORT QDltFileItem
 {
@@ -212,6 +213,12 @@ public:
     */
     void enableSortByTime(bool state);
 
+    //! Enable or disable sort by time.
+    /*!
+      \return state true if sort by time, false if sort by time is disabled
+    */
+    void enableSortByTimestamp(bool state);
+
     //! Check if message matches the filter.
     /*!
       \param msg The message to be checked
@@ -242,7 +249,11 @@ public:
       \param msg The messages to be marked
       \return 0 if message will not be marked, colour if message will be marked
     */
+#ifdef USECOLOR
+    QColor checkMarker(QDltMsg &msg);
+#else
     QString checkMarker(QDltMsg &msg);
+#endif
 
     //! Get file name of the underlying file object
     /*!
@@ -293,6 +304,13 @@ private:
       false sorting is disabled.
     */
     bool sortByTimeFlag;
+
+    //! Enabling sortByTimestamp.
+    /*!
+      true sorting is enabled.
+      false sorting is disabled.
+    */
+    bool sortByTimestampFlag;
 };
 
 

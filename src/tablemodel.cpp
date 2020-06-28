@@ -23,13 +23,11 @@
 
 #include "tablemodel.h"
 #include "fieldnames.h"
-#include "dltsettingsmanager.h"
 #include "dltuiutils.h"
-#include "optmanager.h"
 #include "dlt_protocol.h"
 
 
-static int lastrow = -1; // necessary because object tablemodel can not be changed, so no member variable can be used
+static long int lastrow = -1; // necessary because object tablemodel can not be changed, so no member variable can be used
 char buffer[DLT_VIEWER_LIST_BUFFER_SIZE];
 
 
@@ -53,7 +51,6 @@ void getmessage( int indexrow, long int filterposindex, unsigned int* decodeflag
  {
   lastrow = indexrow;
  }
-
 }
 
 
@@ -66,6 +63,7 @@ TableModel::TableModel(const QString & /*data*/, QObject *parent)
      lastSearchIndex = -1;
      emptyForceFlag = false;
      loggingOnlyMode = false;
+     searchhit = -1;
      lastrow = -1;
  }
 
@@ -73,6 +71,7 @@ TableModel::TableModel(const QString & /*data*/, QObject *parent)
  {
 
  }
+
 
  int TableModel::columnCount(const QModelIndex & /*parent*/) const
  {
@@ -122,19 +121,20 @@ TableModel::TableModel(const QString & /*data*/, QObject *parent)
              }
              else if(index.column() == FieldNames::Payload)
              {
+                 qDebug() << "Corrupted message at index" << index.row();
                  return QString("!!CORRUPTED MESSAGE!!");
              }
              return QVariant();
           }
          }
 
-         if((DltSettingsManager::getInstance()->value("startup/pluginsEnabled", true).toBool()))
+         if((QDltSettingsManager::getInstance()->value("startup/pluginsEnabled", true).toBool()))
          {
              if ( decodeflag == 1 )
               {
                decodeflag = 0;
                last_decoded_msg = msg;
-               pluginManager->decodeMsg(msg,!OptManager::getInstance()->issilentMode());
+               pluginManager->decodeMsg(msg,!QDltOptManager::getInstance()->issilentMode());
                last_decoded_msg = msg;
               }
               else
@@ -246,7 +246,7 @@ TableModel::TableModel(const QString & /*data*/, QObject *parent)
                  return QString("Logging only Mode! Disable in Project Settings!");
              }
              /* display payload */
-             return msg.toStringPayload();
+             return msg.toStringPayload().trimmed().replace('\n', ' ');
          default:
              if (index.column()>=FieldNames::Arg0)
              {
@@ -293,13 +293,13 @@ TableModel::TableModel(const QString & /*data*/, QObject *parent)
      {
          getmessage( index.row(), filterposindex, &decodeflag, &msg, &lastmsg, qfile, &success); // version2
 
-         if((DltSettingsManager::getInstance()->value("startup/pluginsEnabled", true).toBool()))
+         if((QDltSettingsManager::getInstance()->value("startup/pluginsEnabled", true).toBool()))
          {
              if ( decodeflag == 1 )
               {
                decodeflag = 0;
                last_decoded_msg = msg;
-               pluginManager->decodeMsg(msg,!OptManager::getInstance()->issilentMode());
+               pluginManager->decodeMsg(msg,!QDltOptManager::getInstance()->issilentMode());
                last_decoded_msg = msg;
               }
               else
@@ -309,12 +309,21 @@ TableModel::TableModel(const QString & /*data*/, QObject *parent)
          }
 
          QColor color = qfile->checkMarker(msg);
+
          if(color.isValid())
          {
             return QVariant(QBrush(color));
          }
          else
          {
+             if ( searchhit > -1 && searchhit == index.row() )
+             {
+               return QVariant(QBrush(searchhit_higlightColor));
+             }
+             if ( selectedMarkerRows.contains(index.row()) )
+             {
+               return QVariant(QBrush(manualMarkerColor));
+             }
              if(project->settings->autoMarkFatalError && ( msg.getSubtypeString() == "error" || msg.getSubtypeString() == "fatal") )
              {
                 return QVariant(QBrush(QColor(255,0,0)));
@@ -328,8 +337,7 @@ TableModel::TableModel(const QString & /*data*/, QObject *parent)
              {
                 return QVariant(QBrush(QColor(0,255,0)));
              }
-
-             return QVariant(QBrush(QColor(255,255,255)));
+             return QVariant(QBrush(QColor(255,255,255))); // this is the default background clor
          }
      }
 
@@ -436,10 +444,23 @@ QVariant TableModel::headerData(int section, Qt::Orientation orientation,
      emit(layoutChanged());
  }
 
+int TableModel::setManualMarker(QList<unsigned long int> selectedRows, QColor hlcolor) //used in mainwindow
+{
+manualMarkerColor = hlcolor;
+this->selectedMarkerRows = selectedRows;
+return 0;
+}
+
+int TableModel::setMarker(long int lineindex, QColor hlcolor)
+{
+  searchhit_higlightColor = hlcolor;
+  searchhit = lineindex;
+  return 0;
+}
 
 QColor TableModel::searchBackgroundColor() const
 {
-    QString color = DltSettingsManager::getInstance()->value("other/searchResultColor", QString("#00AAFF")).toString();
+    QString color = QDltSettingsManager::getInstance()->value("other/searchResultColor", QString("#00AAFF")).toString();
     QColor hlColor(color);
     return hlColor;
 }

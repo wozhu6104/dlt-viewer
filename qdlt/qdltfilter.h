@@ -31,7 +31,7 @@
 #include <time.h>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
-
+#include <QRegularExpression>
 #include "export_rules.h"
 
 
@@ -50,6 +50,7 @@ public:
     QString header;
     QString payload;
 
+    bool enableRegexp_Appid;
     bool enableRegexp_Context;
     bool enableRegexp_Header;
     bool enableRegexp_Payload;
@@ -73,9 +74,10 @@ public:
     int logLevelMin;
 
     // generated from header and payload string
-    QRegExp headerRegexp;
-    QRegExp payloadRegexp;
-    QRegExp contextRegexp;
+    QRegularExpression headerRegularExpression;
+    QRegularExpression payloadRegularExpression;
+    QRegularExpression contextRegularExpression;
+    QRegularExpression appidRegularExpression;
 
     //! Constructor.
     /*!

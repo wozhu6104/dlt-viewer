@@ -1750,7 +1750,7 @@ int dlt_file_read(DltFile *file,int verbose)
         {
             /* go back to last position in file */
             fseek(file->handle,file->file_position,SEEK_SET);
-            sprintf(str,"Seek failed to skip extra header and payload data from file of size %lu!\n",
+            sprintf(str,"Seek failed to skip extra header and payload data from file of size %zu!\n",
                     file->msg.headersize - sizeof(DltStorageHeader) - sizeof(DltStandardHeader) + file->msg.datasize);
             dlt_log(LOG_ERR, str);
             return -1;
@@ -2931,6 +2931,7 @@ speed_t dlt_convert_serial_speed(int baudrate)
 
     return ret;
 #else
+    (void) baudrate;
     return 0;
 #endif
 }
@@ -3050,7 +3051,7 @@ int dlt_message_print_mixed_html(DltMessage *message, char *text, uint32_t size,
 
 int dlt_message_argument_print(DltMessage *msg,uint32_t type_info,uint8_t **ptr,int32_t *datalength,char *text,int textlength,int byteLength,int verbose)
 {
-    verbose = verbose; // unused
+    (void) verbose; // unused
 
     int16_t length=0,length_tmp=0; /* the macro can set this variable to -1 */
     uint16_t length2=0,length2_tmp=0,length3=0,length3_tmp=0;

@@ -49,6 +49,7 @@ QDltFilter& QDltFilter::operator= (QDltFilter const& _filter)
     header = _filter.header;
     payload = _filter.payload;
 
+    enableRegexp_Appid   = _filter.enableRegexp_Appid;
     enableRegexp_Context = _filter.enableRegexp_Context;
     enableRegexp_Header  = _filter.enableRegexp_Header;
     enableRegexp_Payload = _filter.enableRegexp_Payload;
@@ -71,9 +72,10 @@ QDltFilter& QDltFilter::operator= (QDltFilter const& _filter)
     logLevelMin = _filter.logLevelMin;
 
     // generated from header and payload string
-    headerRegexp = _filter.headerRegexp;
-    payloadRegexp = _filter.payloadRegexp;
-    contextRegexp = _filter.contextRegexp;
+    headerRegularExpression  = _filter.headerRegularExpression;
+    payloadRegularExpression = _filter.payloadRegularExpression;
+    contextRegularExpression = _filter.contextRegularExpression;
+    appidRegularExpression   = _filter.appidRegularExpression;
 
     return *this;
 }
@@ -89,6 +91,7 @@ void QDltFilter::clear()
     header.clear();
     payload.clear();
 
+    enableRegexp_Appid = false;
     enableRegexp_Context = false;
     enableRegexp_Header = false;
     enableRegexp_Payload = false;
@@ -127,68 +130,100 @@ bool QDltFilter::isNegative() const
 
 bool QDltFilter::compileRegexps()
 {
-    headerRegexp.setPattern(header);
-    payloadRegexp.setPattern(payload);
-    contextRegexp.setPattern(ctid);
-    headerRegexp.setCaseSensitivity(ignoreCase_Header?Qt::CaseInsensitive:Qt::CaseSensitive);
-    payloadRegexp.setCaseSensitivity(ignoreCase_Payload?Qt::CaseInsensitive:Qt::CaseSensitive);
-    return (headerRegexp.isValid() && payloadRegexp.isValid() && contextRegexp.isValid());
+
+    headerRegularExpression.setPattern(header);
+    payloadRegularExpression.setPattern(payload);
+    contextRegularExpression.setPattern(ctid);
+    appidRegularExpression.setPattern(apid);
+
+    headerRegularExpression.setPatternOptions(ignoreCase_Header?QRegularExpression::NoPatternOption:QRegularExpression::CaseInsensitiveOption);
+    payloadRegularExpression.setPatternOptions(ignoreCase_Payload?QRegularExpression::NoPatternOption:QRegularExpression::CaseInsensitiveOption);
+
+    return (headerRegularExpression.isValid() &&
+            payloadRegularExpression.isValid() &&
+            contextRegularExpression.isValid() &&
+            appidRegularExpression.isValid());
 }
 
 bool QDltFilter::match(QDltMsg &msg) const
 {
-    if(enableEcuid && (msg.getEcuid() != ecuid)) {
-        return false;
-    }
-    if(enableApid && (msg.getApid() != apid)) {
+
+    if( (true == enableEcuid) && (msg.getEcuid() != ecuid))
+    {
         return false;
     }
 
-    if(enableRegexp_Context)
+    if( true == enableRegexp_Appid )
     {
-        if(enableCtid && contextRegexp.indexIn(msg.getCtid()) < 0) {
+        if( (true == enableApid) && ( false == appidRegularExpression.match(msg.getApid()).hasMatch() ) )
+        {
+            return false;
+        }
+
+    }
+    else
+    {
+        if( (true == enableApid) && (msg.getApid() != apid))
+        {
+            return false;
+        }
+    }
+
+    if(true == enableRegexp_Context)
+    {
+        if( (true == enableCtid) && ( false == contextRegularExpression.match(msg.getCtid()).hasMatch() ) )
+        {
             return false;
         }
     }
     else
     {
-        if(enableCtid && !(msg.getCtid().contains(ctid))) {
+        if( (true ==enableCtid) && ( false == msg.getCtid().contains(ctid) ) )
+        {
             return false;
         }
     }
 
-    if(enableRegexp_Header)
+    if(true == enableRegexp_Header)
     {
-        if(enableHeader && headerRegexp.indexIn(msg.toStringHeader()) < 0) {
+        if( (true == enableHeader) && ( false == headerRegularExpression.match(msg.toStringHeader(),ignoreCase_Header?QRegularExpression::NoPatternOption:QRegularExpression::CaseInsensitiveOption).hasMatch() ) )
+        {
             return false;
         }
     }
     else
     {
-        if(enableHeader && !(msg.toStringHeader().contains(header,ignoreCase_Header?Qt::CaseInsensitive:Qt::CaseSensitive))) {
+        if( ( true == enableHeader ) && ( false == msg.toStringHeader().contains(header,ignoreCase_Header?Qt::CaseInsensitive:Qt::CaseSensitive)) )
+        {
             return false;
         }
     }
-    if(enableRegexp_Payload)
+
+    if( true == enableRegexp_Payload)
     {
-        if(enablePayload && payloadRegexp.indexIn(msg.toStringPayload()) < 0) {
+        if( (true == enablePayload) && ( false == payloadRegularExpression.match(msg.toStringPayload(),ignoreCase_Payload?QRegularExpression::NoPatternOption:QRegularExpression::CaseInsensitiveOption).hasMatch() ) )
+        {
             return false;
         }
     }
     else
     {
-        if(enablePayload && !(msg.toStringPayload().contains(payload,ignoreCase_Payload?Qt::CaseInsensitive:Qt::CaseSensitive))) {
+        if( (true == enablePayload) && ( false == msg.toStringPayload().contains(payload,ignoreCase_Payload?Qt::CaseInsensitive:Qt::CaseSensitive)) )
+        {
             return false;
         }
     }
 
-    if(enableCtrlMsgs && !((msg.getType() == QDltMsg::DltTypeControl))) {
+    if(enableCtrlMsgs && !((msg.getType() == QDltMsg::DltTypeControl)))
+    {
         return false;
     }
-    if(enableLogLevelMax && !((msg.getType() == QDltMsg::DltTypeLog) && (msg.getSubtype() <= logLevelMax))) {
+    if(enableLogLevelMax && !((msg.getType() == QDltMsg::DltTypeLog) && (msg.getSubtype() <= logLevelMax)))
+    {
         return false;
     }
-    if(enableLogLevelMin && !((msg.getType() == QDltMsg::DltTypeLog) && (msg.getSubtype() >= logLevelMin))) {
+    if(enableLogLevelMin && !((msg.getType() == QDltMsg::DltTypeLog) && (msg.getSubtype() >= logLevelMin)))
+    {
         return false;
     }
 
@@ -232,8 +267,13 @@ void QDltFilter::LoadFilterItem(QXmlStreamReader &xml)
     }
     if(xml.name() == QString("enableregexp"))    //legacy
     {
+        enableRegexp_Appid   = xml.readElementText().toInt();
         enableRegexp_Context = xml.readElementText().toInt();
         enableRegexp_Header  = xml.readElementText().toInt();
+    }
+    if(xml.name() == QString("enableregexp_Appid"))
+    {
+          enableRegexp_Appid = xml.readElementText().toInt();
     }
     if(xml.name() == QString("enableregexp_Context"))
     {
@@ -320,6 +360,7 @@ void QDltFilter::SaveFilterItem(QXmlStreamWriter &xml)
     xml.writeTextElement("headertext",header);
     xml.writeTextElement("payloadtext",payload);
 
+    xml.writeTextElement("enableregexp_Appid",QString("%1").arg(enableRegexp_Appid));
     xml.writeTextElement("enableregexp_Context",QString("%1").arg(enableRegexp_Context));
     xml.writeTextElement("enableregexp_Header",QString("%1").arg(enableRegexp_Header));
     xml.writeTextElement("enableregexp_Payload",QString("%1").arg(enableRegexp_Payload));
